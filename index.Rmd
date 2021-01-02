@@ -1,0 +1,155 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Zavud Baghirov"
+date: "1/2/2021"
+output: html_document
+---
+
+# Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+## Data 
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+## The goal of the project
+
+The goal of the project is to build different machine learning models in order to predict the manner in which the users did the exercise.
+
+## 1. Download data, clean and explore it
+
+```{r}
+# load packages
+library(caret); library(ggplot2); library(dplyr); library(tidyverse); library(tidyr); library(randomForest)
+library(rattle); library(rpart.plot); library(rpart); library(gbm); library(corrplot)
+```
+
+```{r}
+# set the wd
+wd = "C:\\Users\\zavud\\Desktop\\my_R_files\\coursera\\8. Practical Machine Learning\\course_project"
+setwd(wd)
+```
+
+```{r, eval=FALSE}
+# download datasets
+url_training = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_testing = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url = url_training,
+              destfile = paste0(wd, "/pml-training.csv"))
+download.file(url = url_testing,
+              destfile = paste0(wd, "/pml-testing.csv"))
+```
+
+```{r}
+# read the training data in and divide it into 2 test and training sets
+full_training = read.csv(file = "pml-training.csv")
+intrain = createDataPartition(y = full_training$classe, p = .7, list = F)
+training = full_training[intrain, ]; testing = full_training[-intrain, ]
+
+# do some cleaning and remove variables that have no enough variability
+no_variance = nearZeroVar(training)
+training = training[,-no_variance]; testing = testing[, -no_variance]
+
+# remove variables that contain too many NA's
+many_NA = c()
+for (i in 1:dim(training)[2]){
+        if (mean(is.na(training[,i])) > .9){
+                many_NA = c(many_NA, i)
+        }
+}
+training = training[, -many_NA]; testing = testing[, -many_NA]
+
+# remove variables that are not important for classification
+training = training[, -c(1:6)]; testing = testing[, -c(1:6)]
+
+# find variables that are collinear
+cor_matrix = cor(x = training[, -53])
+findCorrelation(x = cor_matrix, cutoff = .8, names = T)
+```
+As we can see from the last r code there are several variables in the data set that are very highly correlated. However, we won't remove them as RF models use randomly subgroup of predictors for classification.
+
+## 2. Train Random Forest model and test it
+
+Our first model will be Random Forest classification. We will use the train() function from the caret package.
+
+```{r}
+# train random forest model
+start_rf = Sys.time()
+model_rf = train(classe ~ ., data = training, 
+                 method = "rf", trControl = trainControl(method = "cv", number = 3))
+end_rf = Sys.time()
+run_time_rf = end_rf - start_rf; print(run_time_rf)
+```
+
+Next, we will apply it to our training data set in order to predict and assess the accuracy of the prediction with this model.
+
+```{r}
+# test the accuracy of the rf model
+pred_rf = predict(model_rf, newdata = testing)
+conf_rf = confusionMatrix(pred_rf, factor(testing$classe))
+conf_rf$overall
+```
+
+As we can see, RF model did well on the training data set.
+
+## 2. Train Decision Trees model and test it
+
+Our next model will be Decision Trees model
+
+```{r}
+# train decision trees model
+start_dtrees = Sys.time()
+model_dtrees = rpart(classe ~., data = training, method = "class")
+end_dtrees = Sys.time()
+run_time_dtrees = end_dtrees - start_dtrees; run_time_dtrees
+
+# test the dtrees model
+pred_dtrees = predict(model_dtrees, newdata = testing, type = "class")
+conf_dtrees = confusionMatrix(pred_dtrees, factor(testing$classe))
+conf_dtrees$overall
+```
+
+As we can see DT model did not perform as well as the previous RF model.
+
+## 3. Train GBM model and test it
+
+Our final model will be GBM model.
+
+```{r}
+# train GBM model
+start_gbm = Sys.time()
+model_gbm = train(classe ~., data = training, method = "gbm",
+                  trControl = trainControl(method = "repeatedcv", number = 5, repeats = 1))
+end_gbm = Sys.time()
+run_time_gbm = end_gbm - start_gbm
+run_time_gbm
+
+# test the gbm model
+pred_gbm = predict(model_gbm, newdata = testing)
+conf_gbm = confusionMatrix(pred_gbm, factor(testing$classe));
+conf_gbm$overall
+```
+
+Our GBM model did a very good job, but still not as good as RF model for predicting the classes on the training set.
+
+## Final prediction with the chosen model - Random Forest
+
+As accuracy of RF model is very close to 100% we can be confident that it will predict the classes on the final testing set well. 
+
+```{r}
+# applying the final best model RF on the original testing data set
+original_testing = read.csv(file = "pml-testing.csv")
+original_testing = original_testing[, -no_variance]
+original_testing = original_testing[, -many_NA]
+original_testing = original_testing[, -c(1:6)]
+pred_final = predict(model_rf, newdata = original_testing)
+pred_final
+```
